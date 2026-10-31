@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Language Translator</title>
+<style>
+  :root{
+    --bg:#eef1f6; --panel:#ffffff; --ink:#14181f; --muted:#5d6675; --line:#d5dbe6;
+    --accent:#2b4acb; --accent-ink:#fff; --err:#b3261e;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#10131a; --panel:#181c26; --ink:#e8ebf2; --muted:#98a1b3; --line:#2a3141; --accent:#7f98ff; --accent-ink:#10131a; --err:#ff8a80; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;justify-content:center;padding:32px 16px}
+  main{width:100%;max-width:920px}
+  h1{font-size:1.6rem;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--muted);margin:0 0 24px}
+  .bar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+  select{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:10px 14px}
+  button:hover{border-color:var(--accent)}
+  button:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button:disabled{opacity:.5;cursor:default}
+  #swap{padding:10px 12px}
+  .panes{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:700px){.panes{grid-template-columns:1fr}}
+  .pane{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-height:240px}
+  textarea,#out{flex:1;width:100%;border:0;background:transparent;color:var(--ink);font:inherit;padding:14px;resize:none;min-height:180px}
+  textarea:focus{outline:none}
+  #out{white-space:pre-wrap;overflow-wrap:anywhere}
+  #out.placeholder{color:var(--muted)}
+  #out.error{color:var(--err)}
+  .foot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--line);color:var(--muted);font-size:.85rem}
+  .foot .acts{display:flex;gap:6px}
+  .foot button{padding:6px 10px;font-size:.85rem}
+  #go{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600;margin-top:12px;width:100%;padding:12px}
+  #go:hover{filter:brightness(1.08)}
+  .detected{font-size:.85rem;color:var(--muted);margin-top:8px;min-height:1.2em}
+</style>
+</head>
+<body>
+<main>
+  <h1>Language Translator</h1>
+  <p class="sub">Type or paste text, pick languages, translate.</p>
+
+  <div class="bar">
+    <select id="src" aria-label="Source language"></select>
+    <button id="swap" title="Swap languages" aria-label="Swap languages">⇄</button>
+    <select id="tgt" aria-label="Target language"></select>
+  </div>
+
+  <div class="panes">
+    <div class="pane">
+      <textarea id="inp" maxlength="500" placeholder="Enter text to translate"></textarea>
+      <div class="foot"><span><span id="count">0</span>/500</span>
+        <div class="acts"><button id="clear">Clear</button><button id="listenIn">Listen</button></div></div>
+    </div>
+    <div class="pane">
+      <div id="out" class="placeholder" aria-live="polite">Translation appears here</div>
+      <div class="foot"><span>&nbsp;</span>
+        <div class="acts"><button id="copy" disabled>Copy</button><button id="listenOut" disabled>Listen</button></div></div>
+    </div>
+  </div>
+
+  <button id="go">Translate</button>
+  <div class="detected" id="note"></div>
+</main>
+
+<script>
+const LANGS = [
+  ["en","English"],["hi","Hindi"],["te","Telugu"],["ta","Tamil"],["kn","Kannada"],["ml","Malayalam"],
+  ["bn","Bengali"],["mr","Marathi"],["gu","Gujarati"],["pa","Punjabi"],["ur","Urdu"],
+  ["es","Spanish"],["fr","French"],["de","German"],["it","Italian"],["pt","Portuguese"],
+  ["ru","Russian"],["ar","Arabic"],["ja","Japanese"],["ko","Korean"],["zh-CN","Chinese (Simplified)"],
+  ["tr","Turkish"],["nl","Dutch"],["id","Indonesian"],["th","Thai"],["vi","Vietnamese"]
+];
+const $ = id => document.getElementById(id);
+const src = $("src"), tgt = $("tgt"), inp = $("inp"), out = $("out"), note = $("note");
+
+src.innerHTML = '<option value="autodetect">Detect language</option>' + LANGS.map(([c,n]) => `<option value="${c}">${n}</option>`).join("");
+tgt.innerHTML = LANGS.map(([c,n]) => `<option value="${c}">${n}</option>`).join("");
+src.value = "en"; tgt.value = "hi";
+
+function setOut(text, cls){
+  out.textContent = text;
+  out.className = cls || "";
+  const ok = !cls;
+  $("copy").disabled = !ok; $("listenOut").disabled = !ok;
+}
+
+async function translate(){
+  const text = inp.value.trim();
+  note.textContent = "";
+  if(!text){ setOut("Enter some text first.", "error"); return; }
+  if(src.value === tgt.value){ setOut(text); return; }
+  $("go").disabled = true; $("go").textContent = "Translating…";
+  try{
+    const url = "https://api.mymemory.translated.net/get?q=" + encodeURIComponent(text) +
+                "&langpair=" + encodeURIComponent(src.value + "|" + tgt.value);
+    const res = await fetch(url);
+    if(!res.ok) throw new Error("Network error (" + res.status + ")");
+    const data = await res.json();
+    if(data.responseStatus !== 200) throw new Error(data.responseDetails || "Translation failed");
+    setOut(data.responseData.translatedText);
+    const d = data.matches && data.matches[0] && data.matches[0].source;
+    if(src.value === "autodetect" && d) note.textContent = "Detected source: " + d;
+  }catch(e){
+    setOut("Could not translate: " + e.message + ". Check your connection and try again.", "error");
+  }finally{
+    $("go").disabled = false; $("go").textContent = "Translate";
+  }
+}
+
+function speak(text, lang){
+  if(!("speechSynthesis" in window)){ note.textContent = "Text-to-speech isn't supported in this browser."; return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang === "autodetect" ? "en" : lang;
+  speechSynthesis.speak(u);
+}
+
+$("go").onclick = translate;
+inp.addEventListener("keydown", e => { if(e.key === "Enter" && (e.ctrlKey || e.metaKey)) translate(); });
+inp.addEventListener("input", () => $("count").textContent = inp.value.length);
+$("clear").onclick = () => { inp.value = ""; $("count").textContent = 0; out.className = "placeholder"; out.textContent = "Translation appears here"; $("copy").disabled = $("listenOut").disabled = true; note.textContent = ""; inp.focus(); };
+$("swap").onclick = () => {
+  if(src.value === "autodetect") return;
+  [src.value, tgt.value] = [tgt.value, src.value];
+  if(!out.className){ inp.value = out.textContent; $("count").textContent = inp.value.length; }
+  setOut("Translation appears here", "placeholder");
+};
+$("copy").onclick = async () => {
+  try{ await navigator.clipboard.writeText(out.textContent); $("copy").textContent = "Copied"; }
+  catch{ $("copy").textContent = "Copy failed"; }
+  setTimeout(() => $("copy").textContent = "Copy", 1500);
+};
+$("listenIn").onclick = () => inp.value.trim() && speak(inp.value, src.value);
+$("listenOut").onclick = () => speak(out.textContent, tgt.value);
+</script>
+</body>
+</html>
